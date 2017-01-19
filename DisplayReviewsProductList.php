@@ -33,6 +33,7 @@
  */
 class DisplayReviewsProductList extends SC_Plugin_Base
 {
+
     /**
      * コンストラクタ
      *
@@ -42,8 +43,9 @@ class DisplayReviewsProductList extends SC_Plugin_Base
     public function __construct(array $arrSelfInfo)
     {
         // プラグインを有効化したときの初期設定をココに追加する
-        if($arrSelfInfo["enable"] == 1) {}
-
+        if ($arrSelfInfo["enable"] == 1) {
+            
+        }
     }
 
     /**
@@ -59,11 +61,6 @@ class DisplayReviewsProductList extends SC_Plugin_Base
         // htmlディレクトリにファイルを配置。
         $src_dir = PLUGIN_UPLOAD_REALDIR . "{$arrPlugin["plugin_code"]}/html/";
         $dest_dir = HTML_REALDIR;
-        SC_Utils::copyDirectory($src_dir, $dest_dir);
-        
-        // テンプレートを配置。
-        $src_dir = PLUGIN_UPLOAD_REALDIR . "{$arrPlugin["plugin_code"]}/data/Smarty/templates/";
-        $dest_dir = SMARTY_TEMPLATES_REALDIR;
         SC_Utils::copyDirectory($src_dir, $dest_dir);
     }
 
@@ -81,11 +78,6 @@ class DisplayReviewsProductList extends SC_Plugin_Base
         $target_dir = HTML_REALDIR;
         $source_dir = PLUGIN_UPLOAD_REALDIR . "{$arrPlugin["plugin_code"]}/html/";
         self::deleteDirectory($target_dir, $source_dir);
-        
-        // テンプレートを削除。 
-        $target_dir = SMARTY_TEMPLATES_REALDIR;
-        $source_dir = PLUGIN_UPLOAD_REALDIR . "{$arrPlugin["plugin_code"]}/data/Smarty/templates/";
-        self::deleteDirectory($target_dir, $source_dir);
     }
 
     /**
@@ -98,6 +90,8 @@ class DisplayReviewsProductList extends SC_Plugin_Base
      */
     public function enable($arrPlugin, $objPluginInstaller = null)
     {
+        // テンプレートをコピー。
+        self::copyTemplate($arrPlugin);
     }
 
     /**
@@ -110,6 +104,8 @@ class DisplayReviewsProductList extends SC_Plugin_Base
      */
     public function disable($arrPlugin, $objPluginInstaller = null)
     {
+        // テンプレートを削除。 
+        self::deleteTemplate($arrPlugin);
     }
 
     /**
@@ -121,9 +117,8 @@ class DisplayReviewsProductList extends SC_Plugin_Base
     {
         $objHelperPlugin->addAction("prefilterTransform", array(&$this, "prefilterTransform"), $priority);
         $objHelperPlugin->addAction("LC_Page_Products_List_action_after", array(&$this, "products_list_action_after"), $priority);
-        
     }
-    
+
     /**
      * @param LC_Page_Admin_Products_Product $objPage 商品管理のページクラス
      * @return void
@@ -132,27 +127,23 @@ class DisplayReviewsProductList extends SC_Plugin_Base
     {
         // レビュー数を設定
         $objPage->arrProductReviews = $this->getProductRevirews($objPage->arrProducts);
-
     }
-    
+
     public function getProductRevirews($productIds)
     {
         if (empty($productIds)) {
             return array();
         }
-        $objQuery =& SC_Query_Ex::getSingletonInstance();
-        $cols = 'product_id, count(product_id)';
-        $from = 'dtb_rview';
-        $where = 'product_id IN (' . SC_Utils_Ex::repeatStrWithSeparator('?', count($productIds)) . ')';
+        $objQuery = & SC_Query_Ex::getSingletonInstance();
+        $cols = 'product_id, count(product_id) AS reviews';
+        $from = 'dtb_review';
+        $where = 'product_id IN (' . SC_Utils_Ex::repeatStrWithSeparator('?', count($productIds)) . ') AND status = 1';
         $objQuery->setGroupBy("product_id");
-        $productStatus = $objQuery->select($cols, $from, $where, $productIds);
+        $productReview = $objQuery->select($cols, $from, $where, array_keys($productIds));
         $results = array();
-        /**
-        foreach ($productStatus as $status) {
-            $results[$status['product_id']][] = $status['product_status_id'];
+        foreach ($productReview as $review) {
+            $results[$review['product_id']] = $review['reviews'];
         }
-         * 
-         */
 
         return $results;
     }
@@ -170,6 +161,11 @@ class DisplayReviewsProductList extends SC_Plugin_Base
         $objTransform = new SC_Helper_Transform($source);
         switch ($objPage->arrPageLayout['device_type_id']) {
             case DEVICE_TYPE_PC:
+                if (strpos($filename, "products/list.tpl") !== false) {
+                    $template_path = "products/plg_DisplayReviewsProductList_list.tpl";
+                    $template = "<!--{include file='{$template_path}'}-->";
+                    $objTransform->select(".listrightbloc h3")->insertAfter($template);
+                }
                 break;
             case DEVICE_TYPE_MOBILE:
                 break;
@@ -180,16 +176,16 @@ class DisplayReviewsProductList extends SC_Plugin_Base
                 break;
         }
         $source = $objTransform->getHTML();
-
     }
-    
+
     /**
      * 指定されたパスを比較して再帰的に削除します。
      * 
      * @param string $target_dir 削除対象のディレクトリ
      * @param string $source_dir 比較対象のディレクトリ
      */
-    public static function deleteDirectory($target_dir, $source_dir) {
+    public static function deleteDirectory($target_dir, $source_dir)
+    {
         $dir = opendir($source_dir);
         while ($name = readdir($dir)) {
             if ($name == '.' || $name == '..') {
@@ -198,7 +194,7 @@ class DisplayReviewsProductList extends SC_Plugin_Base
 
             $target_path = $target_dir . '/' . $name;
             $source_path = $source_dir . '/' . $name;
-            
+
             if (is_file($source_path)) {
                 if (is_file($target_path)) {
                     unlink($target_path);
@@ -211,6 +207,58 @@ class DisplayReviewsProductList extends SC_Plugin_Base
             }
         }
         closedir($dir);
+    }
+
+    /**
+     * 本体にテンプレートをコピー
+     * 
+     * @param type $arrPlugin
+     */
+    public static function copyTemplate($arrPlugin)
+    {
+        $src_dir = PLUGIN_UPLOAD_REALDIR . "{$arrPlugin["plugin_code"]}/data/Smarty/templates/";
+
+        // 管理画面テンプレートを配置。
+        $dest_dir = TEMPLATE_ADMIN_REALDIR;
+        SC_Utils::copyDirectory($src_dir . "admin/", $dest_dir);
+
+        // PCテンプレートを配置。
+        $dest_dir = SC_Helper_PageLayout_Ex::getTemplatePath(DEVICE_TYPE_PC);
+        SC_Utils::copyDirectory($src_dir . "default/", $dest_dir);
+
+        // スマホテンプレートを配置。
+        $dest_dir = SC_Helper_PageLayout_Ex::getTemplatePath(DEVICE_TYPE_SMARTPHONE);
+        SC_Utils::copyDirectory($src_dir . "sphone/", $dest_dir);
+
+        // モバイルテンプレートを配置。
+        $dest_dir = SC_Helper_PageLayout_Ex::getTemplatePath(DEVICE_TYPE_MOBILE);
+        SC_Utils::copyDirectory($src_dir . "mobile/", $dest_dir);
+    }
+
+    /**
+     * 本体にコピーしたテンプレートを削除
+     * 
+     * @param type $arrPlugin
+     */
+    public static function deleteTemplate($arrPlugin)
+    {
+        $src_dir = PLUGIN_UPLOAD_REALDIR . "{$arrPlugin["plugin_code"]}/data/Smarty/templates/";
+
+        // 管理画面テンプレートを削除。 
+        $target_dir = TEMPLATE_ADMIN_REALDIR;
+        self::deleteDirectory($target_dir, $src_dir . "admin/");
+
+        // PCテンプレートを削除。
+        $target_dir = SC_Helper_PageLayout_Ex::getTemplatePath(DEVICE_TYPE_PC);
+        self::deleteDirectory($target_dir, $src_dir . "default/");
+
+        // スマホテンプレートを削除。
+        $target_dir = SC_Helper_PageLayout_Ex::getTemplatePath(DEVICE_TYPE_SMARTPHONE);
+        self::deleteDirectory($target_dir, $src_dir . "sphone/");
+
+        // モバイルテンプレートを削除。
+        $target_dir = SC_Helper_PageLayout_Ex::getTemplatePath(DEVICE_TYPE_MOBILE);
+        self::deleteDirectory($target_dir, $src_dir . "mobile/");
     }
 
 }
